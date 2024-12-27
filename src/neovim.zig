@@ -77,6 +77,7 @@ const Grid = struct {
     fn draw(self: *Grid, surface: *vxfw.Surface) void {
         assert(self.offset_x == 0 and self.offset_y == 0);
         assert(self.screen.width == surface.size.width and self.screen.height == surface.size.height);
+        surface.focusable = true;
         var row: u16 = 0;
         while (row < self.screen.height) : (row += 1) {
             var col: u16 = 0;
