@@ -173,7 +173,6 @@ pub const Neovim = struct {
             .init => {
                 log.debug("init", .{});
                 try self.client.spawn(self, Neovim.handleNeovimNotification);
-                try self.client.uiAttach(80, 24, .{ .ext_linegrid = true });
                 try ctx.tick(8, self.widget());
             },
             .tick => {
@@ -210,6 +209,18 @@ pub const Neovim = struct {
         if (ctx.max.width == null or ctx.max.height == null)
             @panic("Neovim requires a maximum size");
         const max = ctx.max.size();
+        const surface = self.surface orelse {
+            self.client.uiAttach(max.width, max.height, .{ .ext_linegrid = true }) catch |err| {
+                log.err("couldn't attach to UI: {}", .{err});
+            };
+            return .{
+                .size = ctx.min,
+                .widget = self.widget(),
+                .buffer = &.{},
+                .children = &.{},
+            };
+        };
+
         if (max.width != self.size.width or
             max.height != self.size.height)
         {
@@ -224,9 +235,7 @@ pub const Neovim = struct {
                 .children = &.{},
             };
         }
-        if (self.surface) |surface|
-            return surface;
-        @panic("why don't we have a surface");
+        return surface;
     }
 
     fn handleUiEvent(self: *Neovim, ctx: *vxfw.EventContext, event: Client.UiEvent) anyerror!void {
