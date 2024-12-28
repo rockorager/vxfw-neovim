@@ -23,7 +23,10 @@ const Grid = struct {
     offset_y: i17 = 0,
     screen: vaxis.AllocatingScreen,
 
-    cursor: ?struct { row: u16, col: u16 } = null,
+    cursor: ?struct {
+        row: u16,
+        col: u16,
+    } = null,
 
     fn create(allocator: std.mem.Allocator, id: usize, width: u16, height: u16) std.mem.Allocator.Error!*Grid {
         const grid = try allocator.create(Grid);
@@ -109,6 +112,8 @@ pub const Neovim = struct {
     size: vxfw.Size = .{},
     hl_attrs: std.ArrayList(HlAttr),
     grids: std.ArrayList(*Grid),
+    modes: []Client.ModeInfo = &.{},
+    mode: usize = 0,
 
     notifications: vaxis.Queue(Client.Notification, 256) = .{},
 
@@ -141,6 +146,11 @@ pub const Neovim = struct {
             grid.screen.deinit(gpa);
             gpa.destroy(grid);
         }
+        for (self.modes) |mode| {
+            mode.deinit(gpa);
+        }
+        gpa.free(self.modes);
+
         gpa.free(self.client.process.argv);
         self.grids.deinit();
         self.hl_attrs.deinit();
@@ -247,6 +257,11 @@ pub const Neovim = struct {
                 if (self.surface) |*surface| {
                     grid.draw(surface);
                     ctx.redraw = true;
+                    if (surface.cursor) |_| {
+                        if (self.getMode(self.mode)) |mode| {
+                            surface.cursor.?.shape = mode.cursor_shape;
+                        }
+                    }
                 }
                 grid.cursor = null;
             },
@@ -317,6 +332,19 @@ pub const Neovim = struct {
                         .col = gcg.col,
                     };
                 }
+            },
+            .mode_info_set => |set| {
+                for (self.modes) |mode| {
+                    mode.deinit(self.gpa);
+                }
+                self.gpa.free(self.modes);
+                self.modes = try self.gpa.alloc(Client.ModeInfo, set.mode_infos.len);
+                for (set.mode_infos, 0..) |mode_info, i| {
+                    self.modes[i] = try mode_info.clone(self.gpa);
+                }
+            },
+            .mode_change => |chg| {
+                self.mode = chg.mode_idx;
             },
             else => {},
         }
@@ -492,6 +520,11 @@ pub const Neovim = struct {
             if (grid.id == id) return grid;
         }
         return null;
+    }
+
+    fn getMode(self: Neovim, idx: usize) ?Client.ModeInfo {
+        if (idx >= self.modes.len) return null;
+        return self.modes[idx];
     }
 
     fn attrToStyle(self: Neovim, attr_id: usize) vaxis.Style {

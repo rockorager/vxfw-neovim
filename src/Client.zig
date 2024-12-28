@@ -2,6 +2,7 @@ const Client = @This();
 
 const std = @import("std");
 const msgpack = @import("msgpack.zig");
+const vaxis = @import("vaxis");
 
 const assert = std.debug.assert;
 
@@ -53,11 +54,7 @@ pub const Notification = union(NotificationType) {
 };
 
 pub const ModeInfo = struct {
-    cursor_shape: enum {
-        block,
-        horizontal,
-        vertical,
-    } = .block,
+    cursor_shape: vaxis.Cell.CursorShape = .block,
     attr_id: u32 = 0,
     short_name: []const u8,
     name: []const u8,
@@ -65,6 +62,15 @@ pub const ModeInfo = struct {
     pub fn deinit(self: ModeInfo, allocator: std.mem.Allocator) void {
         allocator.free(self.short_name);
         allocator.free(self.name);
+    }
+
+    pub fn clone(self: ModeInfo, gpa: std.mem.Allocator) std.mem.Allocator.Error!ModeInfo {
+        return .{
+            .cursor_shape = self.cursor_shape,
+            .attr_id = self.attr_id,
+            .short_name = try gpa.dupe(u8, self.short_name),
+            .name = try gpa.dupe(u8, self.name),
+        };
     }
 };
 
@@ -254,9 +260,50 @@ pub const UiEvent = union(UiEventType) {
                     assert(args.len == 2); // mode_info_set: 2 parameters
                     assert(args[0] == .bool); // cursor_style_enabled: Boolean
                     assert(args[1] == .array); // info: Array
-                    // const infos = allocator.alloc(ModeInfo, args[1].len);
-                    // for (args[1].array) |map| {}
-                    return .unknown;
+                    const info_sets = args[1].array;
+                    const infos = try allocator.alloc(ModeInfo, info_sets.len);
+                    for (info_sets, 0..) |set, i| {
+                        const shape: vaxis.Cell.CursorShape = blk: {
+                            if (set.map.get("cursor_shape")) |shape| {
+                                if (std.mem.eql(u8, shape.str, "block"))
+                                    break :blk .block;
+                                if (std.mem.eql(u8, shape.str, "horizontal"))
+                                    break :blk .underline;
+                                if (std.mem.eql(u8, shape.str, "vertical"))
+                                    break :blk .beam;
+                            }
+                            break :blk .block;
+                        };
+
+                        const attr: u32 = if (set.map.get("attr_id")) |attr_id|
+                            @intCast(attr_id.u64)
+                        else
+                            0;
+
+                        const short = if (set.map.get("short_name")) |sn|
+                            sn.str
+                        else
+                            "";
+
+                        const long = if (set.map.get("name")) |ln|
+                            ln.str
+                        else
+                            "";
+
+                        const mode: ModeInfo = .{
+                            .cursor_shape = shape,
+                            .attr_id = attr,
+                            .short_name = try allocator.dupe(u8, short),
+                            .name = try allocator.dupe(u8, long),
+                        };
+                        infos[i] = mode;
+                    }
+                    return .{
+                        .mode_info_set = .{
+                            .cursor_style_enabled = args[0].bool,
+                            .mode_infos = infos,
+                        },
+                    };
                 },
                 .update_menu => return .update_menu,
                 .busy_start => return .busy_start,
@@ -507,6 +554,12 @@ pub const UiEvent = union(UiEventType) {
 
     pub fn deinit(self: UiEvent, allocator: std.mem.Allocator) void {
         switch (self) {
+            .mode_info_set => |set| {
+                for (set.mode_infos) |info| {
+                    info.deinit(allocator);
+                }
+                allocator.free(set.mode_infos);
+            },
             .mode_change => |change| {
                 allocator.free(change.mode);
             },
