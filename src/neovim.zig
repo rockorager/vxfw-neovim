@@ -364,7 +364,10 @@ pub const Neovim = struct {
                 );
             },
             .grid_line => |gl| {
-                const grid = self.getGrid(gl.grid) orelse @panic("no grid");
+                const grid = self.getGrid(gl.grid) orelse {
+                    log.err("no grid: {d}", .{gl.grid});
+                    return;
+                };
                 var col = gl.col_start;
                 for (gl.cells) |cell| {
                     if (cell.hl_id) |id|
