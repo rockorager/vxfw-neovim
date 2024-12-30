@@ -679,12 +679,14 @@ pub fn callAndWait(self: *Client, method: []const u8, args: anytype) !Response {
 
     // make the call
     const stdin = self.process.stdin orelse return error.NoStdin;
-    try msgpack.pack(stdin.writer().any(), .{
+    var bw = std.io.bufferedWriter(stdin.writer());
+    try msgpack.pack(bw.writer().any(), .{
         0, // request
         id,
         method,
         args,
     }, .{});
+    try bw.flush();
 
     // wait for the response
     while (response.response == null) {
@@ -701,13 +703,14 @@ pub fn callAndWait(self: *Client, method: []const u8, args: anytype) !Response {
 
 fn readEvents(self: *Client, userdata: ?*anyopaque, maybe_callback: ?*const fn (?*anyopaque, Notification) void) void {
     const stdout = self.process.stdout orelse return;
+    var br = std.io.bufferedReader(stdout.reader());
     defer {
         if (maybe_callback) |callback| {
             callback(userdata, .quit);
         }
     }
     while (true) {
-        const value = msgpack.unpackValue(self.allocator, stdout.reader().any()) catch return;
+        const value = msgpack.unpackValue(self.allocator, br.reader().any()) catch return;
         assert(value == .array); // neovim only returns arrays
         const array = value.array;
 
