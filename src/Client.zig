@@ -846,6 +846,48 @@ pub fn input(self: *Client, keys: []const u8) !void {
     defer resp.deinit(self.allocator);
 }
 
+pub const MouseButton = enum {
+    left,
+    right,
+    middle,
+    wheel,
+    move,
+    x1,
+    x2,
+};
+
+pub const MouseAction = enum {
+    press,
+    drag,
+    release,
+    up,
+    down,
+    left,
+    right,
+};
+pub fn inputMouse(
+    self: *Client,
+    button: MouseButton,
+    action: MouseAction,
+    mods: []const u8,
+    row: u16,
+    col: u16,
+) !void {
+    const resp = try callAndWait(
+        self,
+        "nvim_input_mouse",
+        .{
+            @tagName(button),
+            @tagName(action),
+            mods,
+            0,
+            row,
+            col,
+        },
+    );
+    defer resp.deinit(self.allocator);
+}
+
 pub fn setVar(self: *Client, name: []const u8, value: anytype) !void {
     const resp = try callAndWait(self, "nvim_set_var", .{ name, value });
     defer resp.deinit(self.allocator);

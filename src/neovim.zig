@@ -233,6 +233,44 @@ pub const Neovim = struct {
                 }
             },
             .key_press => |key| try self.handleKeyPress(ctx, key),
+            .mouse => |mouse| {
+                const nvim_button: Client.MouseButton = switch (mouse.button) {
+                    .left => .left,
+                    .right => .right,
+                    .middle => .middle,
+                    .wheel_up,
+                    .wheel_down,
+                    .wheel_left,
+                    .wheel_right,
+                    => .wheel,
+                    .none => .move,
+                    else => return,
+                };
+
+                const action: Client.MouseAction = if (nvim_button == .wheel) switch (mouse.button) {
+                    .wheel_up => .up,
+                    .wheel_down => .down,
+                    .wheel_left => .left,
+                    .wheel_right => .right,
+                    else => unreachable,
+                } else switch (mouse.type) {
+                    .press => .press,
+                    .drag => .drag,
+                    .release => .release,
+                    .motion => .release, // This gets ignored
+
+                };
+
+                var buf: [8]u8 = undefined;
+                var fbs = std.io.fixedBufferStream(&buf);
+                if (mouse.mods.ctrl) try fbs.writer().writeByte('C');
+                if (mouse.mods.alt) try fbs.writer().writeByte('A');
+                if (mouse.mods.shift) try fbs.writer().writeByte('S');
+
+                const mods = fbs.getWritten();
+
+                try self.client.inputMouse(nvim_button, action, mods, mouse.row, mouse.col);
+            },
             else => {},
         }
     }
