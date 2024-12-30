@@ -5,6 +5,8 @@ const vaxis = @import("vaxis");
 // Local files
 const Client = @import("Client.zig");
 
+pub const AutocmdEvent = Client.AutocmdEvent;
+
 // Type namespaces
 const Allocator = std.mem.Allocator;
 
@@ -108,6 +110,7 @@ pub const Neovim = struct {
     gpa: std.mem.Allocator,
 
     client: Client,
+    spawned: bool,
 
     size: vxfw.Size = .{},
     hl_attrs: std.ArrayList(HlAttr),
@@ -124,6 +127,7 @@ pub const Neovim = struct {
 
     userdata: ?*anyopaque = null,
     onQuit: ?*const fn (?*anyopaque, *vxfw.EventContext, std.process.Child.Term) anyerror!void = null,
+    onAutocmd: ?*const fn (?*anyopaque, *vxfw.EventContext, Client.AutocmdEvent) anyerror!void = null,
 
     /// args will be appended to `nvim --embed`
     pub fn init(gpa: std.mem.Allocator, args: []const []const u8) Allocator.Error!Neovim {
@@ -143,6 +147,7 @@ pub const Neovim = struct {
             .grids = std.ArrayList(*Grid).init(gpa),
             .surface_arena = std.heap.ArenaAllocator.init(gpa),
             .has_quit = std.atomic.Value(bool).init(false),
+            .spawned = false,
         };
     }
 
@@ -183,15 +188,26 @@ pub const Neovim = struct {
         self.notifications.push(notif);
     }
 
+    pub fn createAutocmd(self: *Neovim, event: []const u8) !void {
+        try self.client.createAutocmd(self.gpa, event);
+    }
+
+    pub fn spawn(self: *Neovim) anyerror!void {
+        if (self.spawned) return;
+
+        self.spawned = true;
+        try self.client.spawn(self, Neovim.handleNeovimNotification);
+    }
+
     /// Handle events from the vxfw runtime
     pub fn handleEvent(self: *Neovim, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
         switch (event) {
             .init => {
-                log.debug("init", .{});
-                try self.client.spawn(self, Neovim.handleNeovimNotification);
+                try self.spawn();
                 try ctx.tick(8, self.widget());
             },
             .tick => {
+                try ctx.tick(8, self.widget());
                 while (self.notifications.tryPop()) |notif| {
                     switch (notif) {
                         .redraw => |ui_events| {
@@ -206,10 +222,15 @@ pub const Neovim = struct {
                                 try onQuit(self.userdata, ctx, term);
                             }
                         },
+                        .autocmd => |au_event| {
+                            defer au_event.deinit(self.gpa);
+                            if (self.onAutocmd) |onAutocmd| {
+                                try onAutocmd(self.userdata, ctx, au_event);
+                            }
+                        },
                         else => {},
                     }
                 }
-                try ctx.tick(8, self.widget());
             },
             .key_press => |key| try self.handleKeyPress(ctx, key),
             else => {},

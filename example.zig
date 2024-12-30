@@ -1,9 +1,8 @@
-const std = @import("std");
-const vaxis = @import("vaxis");
 const neovim = @import("neovim");
-
+const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 
+const std = @import("std");
 var global_term: ?std.process.Child.Term = null;
 
 pub fn main() !void {
@@ -12,7 +11,10 @@ pub fn main() !void {
 
     var nvim = try neovim.Neovim.init(gpa.allocator(), &.{});
     defer nvim.deinit();
+    try nvim.spawn();
+    try nvim.createAutocmd("BufWritePost");
     nvim.onQuit = onQuit;
+    nvim.onAutocmd = onAutocmd;
 
     var app = try vxfw.App.init(gpa.allocator());
     defer app.deinit();
@@ -33,4 +35,10 @@ fn onQuit(ptr: ?*anyopaque, ctx: *vxfw.EventContext, term: std.process.Child.Ter
     _ = ptr;
     ctx.quit = true;
     global_term = term;
+}
+
+fn onAutocmd(ptr: ?*anyopaque, ctx: *vxfw.EventContext, event: neovim.AutocmdEvent) anyerror!void {
+    _ = ctx; // autofix
+    _ = ptr; // autofix
+    std.log.debug("autocmd: {s}, file: {s}", .{ event.event, event.file });
 }

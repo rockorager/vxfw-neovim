@@ -45,12 +45,29 @@ const NotificationType = enum {
     redraw,
     quit,
     unknown,
+    autocmd,
 };
 
 pub const Notification = union(NotificationType) {
     redraw: []UiEvent,
     quit,
     unknown: msgpack.Value,
+    autocmd: AutocmdEvent,
+};
+
+pub const AutocmdEvent = struct {
+    /// Autocmd event name
+    event: []const u8,
+    /// File
+    file: []const u8,
+    /// Match
+    match: []const u8,
+
+    pub fn deinit(self: AutocmdEvent, gpa: std.mem.Allocator) void {
+        gpa.free(self.event);
+        gpa.free(self.file);
+        gpa.free(self.match);
+    }
 };
 
 pub const ModeInfo = struct {
@@ -716,6 +733,7 @@ fn readEvents(self: *Client, userdata: ?*anyopaque, maybe_callback: ?*const fn (
 
         assert(array[0] == .u64); // index 0 is message type as a positive integer
         const packet_type: PacketType = @enumFromInt(array[0].u64);
+        log.debug("value: {}", .{value});
         switch (packet_type) {
             .request => {
                 log.debug("request: {}", .{value});
@@ -772,6 +790,28 @@ fn readEvents(self: *Client, userdata: ?*anyopaque, maybe_callback: ?*const fn (
                             };
                             callback(userdata, .{ .redraw = events_slice });
                         },
+                        .autocmd => {
+                            defer array[2].deinit(self.allocator);
+                            // [Integer, "autocmd", Array]
+                            assert(array[2] == .array);
+                            for (array[2].array) |item| {
+                                assert(item == .array);
+                                assert(item.array.len > 0);
+                                assert(item.array[0] == .map); // autocmd is always a map
+                                const ev = item.array[0].map;
+
+                                const event_name = if (ev.get("event")) |name| name.str else "";
+                                const file = if (ev.get("file")) |name| name.str else "";
+                                const match = if (ev.get("match")) |match| match.str else "";
+
+                                const event: AutocmdEvent = .{
+                                    .event = self.allocator.dupe(u8, event_name) catch "",
+                                    .file = self.allocator.dupe(u8, file) catch "",
+                                    .match = self.allocator.dupe(u8, match) catch "",
+                                };
+                                callback(userdata, .{ .autocmd = event });
+                            }
+                        },
                         .unknown => callback(userdata, .{ .unknown = array[2] }),
                         .quit => unreachable,
                     }
@@ -809,4 +849,25 @@ pub fn input(self: *Client, keys: []const u8) !void {
 pub fn setVar(self: *Client, name: []const u8, value: anytype) !void {
     const resp = try callAndWait(self, "nvim_set_var", .{ name, value });
     defer resp.deinit(self.allocator);
+}
+
+pub fn execLua(self: *Client, lua: []const u8) !void {
+    const resp = try callAndWait(self, "nvim_exec_lua", .{ lua, &.{} });
+    defer resp.deinit(self.allocator);
+}
+
+pub fn createAutocmd(self: *Client, gpa: std.mem.Allocator, event: []const u8) !void {
+    const lua =
+        \\vim.api.nvim_create_autocmd({{ "{s}" }}, {{
+        \\  pattern = {{ "*" }},
+        \\  callback = function(ev)
+        \\    vim.rpcnotify(0, "autocmd", {{ev}})
+        \\  end
+        \\}})
+    ;
+
+    const fmt_lua = try std.fmt.allocPrint(gpa, lua, .{event});
+    log.debug("lua = {s}", .{fmt_lua});
+    defer gpa.free(fmt_lua);
+    return self.execLua(fmt_lua);
 }
