@@ -120,6 +120,11 @@ pub const Neovim = struct {
     surface_arena: std.heap.ArenaAllocator,
     surface: ?vxfw.Surface = null,
 
+    has_quit: std.atomic.Value(bool),
+
+    userdata: ?*anyopaque = null,
+    onQuit: ?*const fn (?*anyopaque, *vxfw.EventContext, std.process.Child.Term) anyerror!void = null,
+
     /// args will be appended to `nvim --embed`
     pub fn init(gpa: std.mem.Allocator, args: []const []const u8) Allocator.Error!Neovim {
         const base_args = &.{ "nvim", "--embed" };
@@ -137,6 +142,7 @@ pub const Neovim = struct {
             .hl_attrs = std.ArrayList(HlAttr).init(gpa),
             .grids = std.ArrayList(*Grid).init(gpa),
             .surface_arena = std.heap.ArenaAllocator.init(gpa),
+            .has_quit = std.atomic.Value(bool).init(false),
         };
     }
 
@@ -195,8 +201,10 @@ pub const Neovim = struct {
                             }
                         },
                         .quit => {
-                            ctx.quit = true;
-                            return;
+                            const term = try self.client.process.wait();
+                            if (self.onQuit) |onQuit| {
+                                try onQuit(self.userdata, ctx, term);
+                            }
                         },
                         else => {},
                     }
