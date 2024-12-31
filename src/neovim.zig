@@ -372,18 +372,18 @@ pub const Neovim = struct {
                 for (gl.cells) |cell| {
                     if (cell.hl_id) |id|
                         style = self.attrToStyle(id);
-                    // FIXME: fix this undefined portion
-                    const width: u16 = @intCast(stringWidth(undefined, cell.content));
                     const repeat = if (cell.repeat) |repeat| repeat else 1;
                     for (0..repeat) |_| {
+                        const content: []const u8 = if (cell.content.len == 0) " " else cell.content;
                         grid.screen.writeCell(col, gl.row, .{
                             .char = .{
-                                .grapheme = cell.content,
-                                .width = @intCast(width),
+                                .grapheme = content,
+                                // Let the renderer measure the glyph
+                                .width = 0,
                             },
                             .style = style,
                         });
-                        col += width;
+                        col += 1;
                     }
                 }
             },
