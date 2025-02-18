@@ -297,6 +297,11 @@ pub const Neovim = struct {
                 .children = &.{},
             };
         };
+        for (surface.buffer) |*cell| {
+            cell.char.grapheme = try ctx.arena.dupe(u8, cell.char.grapheme);
+            cell.link.uri = try ctx.arena.dupe(u8, cell.link.uri);
+            cell.link.params = try ctx.arena.dupe(u8, cell.link.params);
+        }
 
         if (max.width != self.size.width or
             max.height != self.size.height)
